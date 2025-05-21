@@ -1,0 +1,75 @@
+name: Code Style Linters CI
+on: [push, pull_request]
+jobs:
+  run-linter-ci:
+    runs-on: ubuntu-latest
+    outputs:
+      log_content: ${{ steps.read_logs.outputs.log_content }}
+
+    steps:
+      - name: Checkout the code
+        uses: actions/checkout@v4
+
+      - name: Step python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.12'
+
+      - name: Cache pip packages
+        uses: actions/cache@v4
+        with:
+            path: ~/.cache/pip
+            key: pip-${{ hashFiles('**/requirements.txt') }}
+            restore-keys: pip-
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run flake8 ci
+        run: flake8 . --show-source  > flake8_logs_results.txt
+
+      - name: Print the result logs
+        if: always()
+        run: cat flake8_logs_results.txt
+
+      - name: Save flake8 logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: flake8-logs
+          path: flake8_logs_results.txt
+
+      - name: Read flake8 logs and export output
+        if: always()
+        id: read_logs
+        run: |
+          {
+            echo "log_content<<EOF"
+            cat flake8_logs_results.txt
+            echo "EOF"
+          } >> $GITHUB_OUTPUT
+
+  notify-reuslt:
+    runs-on: ubuntu-latest
+    if: always()
+    needs:
+      - run-linter-ci
+
+    steps:
+      - name: Send the email result
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 465
+          username: ${{ secrets.SENDER_EMAIL }}
+          password: ${{ secrets.SENDER_EMAIL_PASSWORD }}
+          to: ${{ secrets.EMAIL_RECIPIENT }}
+          from: Linters CI Bot
+          subject: "Lint Results: ${{ needs.run-linter-ci.result }}"
+          body: |
+            Flake8 results for ${{ github.repository }}@${{ github.sha }}
+            
+            Job status: ${{ needs.run-linter-ci.result }}
+            
+            flake8 Code checker Logs:
+            ${{ needs.run-linter-ci.outputs.log_content }}
